@@ -56,7 +56,7 @@ export function UserMenu({ session }: UserMenuProps) {
         aria-expanded={open}
       >
         <User size={16} className="shrink-0 text-slate-400" />
-        <span className="max-w-[140px] truncate">{session.username}</span>
+        <span className="max-w-[140px] truncate">{session.user.email ?? session.user.id}</span>
         <ChevronDown
           size={14}
           className={cn(
@@ -78,13 +78,13 @@ export function UserMenu({ session }: UserMenuProps) {
           {/* User info */}
           <div className="px-4 py-2 border-b border-slate-700">
             <p className="text-sm font-medium text-white truncate">
-              {session.username}
+              {session.user.email ?? session.user.id}
             </p>
             <p className="text-xs text-slate-400 truncate">
-              {session.companyName}
+              {session.company.companyName}
             </p>
             <span className="mt-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-slate-700 text-slate-300 capitalize">
-              {session.role}
+              {session.company.role}
             </span>
           </div>
 

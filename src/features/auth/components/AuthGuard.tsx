@@ -36,7 +36,7 @@ export function AuthGuard({
   if (!session) return <>{fallback}</>;
 
   // Role requirement specified but current role does not match
-  if (requireRole && session.role !== requireRole) return <>{fallback}</>;
+  if (requireRole && session.company?.role !== requireRole) return <>{fallback}</>;
 
   return <>{children}</>;
 }

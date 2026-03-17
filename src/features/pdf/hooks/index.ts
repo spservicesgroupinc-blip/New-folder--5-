@@ -1,1 +1,1 @@
-export {};
+export { usePdfGeneration } from './usePdfGeneration';

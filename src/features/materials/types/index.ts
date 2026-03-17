@@ -1,1 +1,1 @@
-export {};
+export * from './materials.types';

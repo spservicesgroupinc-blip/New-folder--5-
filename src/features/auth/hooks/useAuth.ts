@@ -1,21 +1,15 @@
 /**
  * useAuth.ts
  *
- * High-level auth hook. Wraps raw context dispatch with login/logout/signup
- * operations that include API calls and localStorage persistence.
+ * High-level auth hook. Wraps Supabase Auth operations with company context
+ * resolution. Handles login, signup (with company creation), crew invite
+ * acceptance, and logout.
  */
 
 import { useCallback } from 'react';
 
-import {
-  loginUser,
-  loginCrew,
-  signupUser,
-} from '../../../shared/services/api/sheetsApi';
-import { STORAGE_KEYS } from '../../../shared/services/storage/storageKeys';
-import localCache from '../../../shared/services/storage/localCache';
+import { supabase } from '../../../shared/services/supabase';
 import { useAuthContext } from '../context/AuthContext';
-import type { UserSession } from '../types/auth.types';
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -24,87 +18,99 @@ import type { UserSession } from '../types/auth.types';
 export function useAuth() {
   const { state, dispatch } = useAuthContext();
 
-  const { session, hasTrialAccess, isLoading } = state;
+  const { session, isLoading, needsCompanySetup } = state;
 
   const isAuthenticated = session !== null;
-  const isAdmin = session?.role === 'admin';
-  const isCrew = session?.role === 'crew';
+  const isAdmin = session?.company.role === 'admin';
+  const isCrew = session?.company.role !== 'admin';
+  const companyId = session?.company.companyId ?? null;
 
   // -------------------------------------------------------------------------
-  // login — admin username + password
+  // login — email + password (works for both admin and crew)
   // -------------------------------------------------------------------------
 
   const login = useCallback(
-    async (username: string, password: string): Promise<void> => {
+    async (email: string, password: string): Promise<void> => {
       dispatch({ type: 'SET_LOADING', payload: true });
-      try {
-        const result = await loginUser(username, password);
-        if (!result) throw new Error('Login returned no session');
-        // Cast: the legacy UserSession from sheetsApi is structurally
-        // compatible with our local UserSession type.
-        const newSession = result as unknown as UserSession;
-        localCache.set<UserSession>(STORAGE_KEYS.SESSION, newSession);
-        dispatch({ type: 'LOGIN', payload: newSession });
-      } catch (err) {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
         dispatch({ type: 'SET_LOADING', payload: false });
-        throw err;
+        throw error;
       }
+      // onAuthStateChange in AuthContext handles the rest
     },
     [dispatch],
   );
 
   // -------------------------------------------------------------------------
-  // loginCrew — crew username + PIN
-  // -------------------------------------------------------------------------
-
-  const loginCrewMember = useCallback(
-    async (username: string, pin: string): Promise<void> => {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      try {
-        const result = await loginCrew(username, pin);
-        if (!result) throw new Error('Crew login returned no session');
-        const newSession = result as unknown as UserSession;
-        localCache.set<UserSession>(STORAGE_KEYS.SESSION, newSession);
-        dispatch({ type: 'LOGIN', payload: newSession });
-      } catch (err) {
-        dispatch({ type: 'SET_LOADING', payload: false });
-        throw err;
-      }
-    },
-    [dispatch],
-  );
-
-  // -------------------------------------------------------------------------
-  // signup — create new company account
+  // signup — create Supabase user, then create company via Edge Function
   // -------------------------------------------------------------------------
 
   const signup = useCallback(
-    async (
-      username: string,
-      password: string,
-      companyName: string,
-    ): Promise<void> => {
+    async (email: string, password: string, companyName: string): Promise<void> => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
-        const result = await signupUser(username, password, companyName);
-        if (!result) throw new Error('Signup returned no session');
-        const newSession = result as unknown as UserSession;
-        localCache.set<UserSession>(STORAGE_KEYS.SESSION, newSession);
-        dispatch({ type: 'LOGIN', payload: newSession });
+        const { error: signUpError } = await supabase.auth.signUp({ email, password });
+        if (signUpError) throw signUpError;
+
+        // Call Edge Function to create company + company_members row
+        const { error: fnError } = await supabase.functions.invoke('create-company', {
+          body: { companyName },
+        });
+        if (fnError) throw fnError;
+
+        // onAuthStateChange in AuthContext handles session setup
       } catch (err) {
         dispatch({ type: 'SET_LOADING', payload: false });
         throw err;
       }
     },
     [dispatch],
+  );
+
+  // -------------------------------------------------------------------------
+  // createCompany — for users who signed up but don't have a company yet
+  // -------------------------------------------------------------------------
+
+  const createCompany = useCallback(
+    async (companyName: string): Promise<void> => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      try {
+        const { error: fnError } = await supabase.functions.invoke('create-company', {
+          body: { companyName },
+        });
+        if (fnError) throw fnError;
+
+        // Force a re-evaluation by triggering a token refresh
+        await supabase.auth.refreshSession();
+      } catch (err) {
+        dispatch({ type: 'SET_LOADING', payload: false });
+        throw err;
+      }
+    },
+    [dispatch],
+  );
+
+  // -------------------------------------------------------------------------
+  // inviteCrew — admin invites a crew member by email
+  // -------------------------------------------------------------------------
+
+  const inviteCrew = useCallback(
+    async (email: string, role: string = 'crew'): Promise<void> => {
+      const { error } = await supabase.functions.invoke('invite-crew', {
+        body: { email, role },
+      });
+      if (error) throw error;
+    },
+    [],
   );
 
   // -------------------------------------------------------------------------
   // logout
   // -------------------------------------------------------------------------
 
-  const logout = useCallback((): void => {
-    localCache.remove(STORAGE_KEYS.SESSION);
+  const logout = useCallback(async (): Promise<void> => {
+    await supabase.auth.signOut();
     dispatch({ type: 'LOGOUT' });
   }, [dispatch]);
 
@@ -114,10 +120,12 @@ export function useAuth() {
     isCrew,
     isAuthenticated,
     isLoading,
-    hasTrialAccess,
+    needsCompanySetup,
+    companyId,
     login,
-    loginCrew: loginCrewMember,
     signup,
+    createCompany,
+    inviteCrew,
     logout,
   };
 }

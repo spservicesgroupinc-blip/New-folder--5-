@@ -1,22 +1,25 @@
 /**
  * auth.types.ts
  *
- * Type definitions for the auth feature. These are independent of the legacy
- * root types.ts UserSession but are structurally compatible with it.
+ * Type definitions for the auth feature. Uses Supabase Auth for identity
+ * and company_members table for role/company context.
  */
 
-export interface User {
-  username: string;
+import type { User as SupabaseUser, Session as SupabaseSession } from '@supabase/supabase-js';
+import type { MemberRole } from '../../../shared/types/database.types';
+
+export type UserRole = MemberRole;
+
+export interface CompanyContext {
+  companyId: number;
   companyName: string;
-  spreadsheetId: string;
-  folderId?: string;
-  token?: string;
+  role: UserRole;
 }
 
-export type UserRole = 'admin' | 'crew';
-
-export interface UserSession extends User {
-  role: UserRole;
+export interface UserSession {
+  user: SupabaseUser;
+  supabaseSession: SupabaseSession;
+  company: CompanyContext;
 }
 
 export interface Permission {
@@ -26,6 +29,6 @@ export interface Permission {
 
 export interface AuthState {
   session: UserSession | null;
-  hasTrialAccess: boolean;
   isLoading: boolean;
+  needsCompanySetup: boolean;
 }

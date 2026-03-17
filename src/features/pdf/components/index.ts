@@ -1,1 +1,1 @@
-export {};
+export { PdfDownloadButton } from './PdfDownloadButton';

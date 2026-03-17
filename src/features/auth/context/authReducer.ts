@@ -14,8 +14,8 @@ import type { AuthState, UserSession } from '../types/auth.types';
 export type AuthAction =
   | { type: 'LOGIN'; payload: UserSession }
   | { type: 'LOGOUT' }
-  | { type: 'SET_TRIAL_ACCESS'; payload: boolean }
-  | { type: 'SET_LOADING'; payload: boolean };
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'NEEDS_COMPANY_SETUP' };
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -23,8 +23,8 @@ export type AuthAction =
 
 export const initialAuthState: AuthState = {
   session: null,
-  hasTrialAccess: false,
-  isLoading: false,
+  isLoading: true,
+  needsCompanySetup: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,7 @@ export function authReducer(state: AuthState, action: AuthAction): AuthState {
         ...state,
         session: action.payload,
         isLoading: false,
+        needsCompanySetup: false,
       };
 
     case 'LOGOUT':
@@ -45,18 +46,20 @@ export function authReducer(state: AuthState, action: AuthAction): AuthState {
         ...state,
         session: null,
         isLoading: false,
-      };
-
-    case 'SET_TRIAL_ACCESS':
-      return {
-        ...state,
-        hasTrialAccess: action.payload,
+        needsCompanySetup: false,
       };
 
     case 'SET_LOADING':
       return {
         ...state,
         isLoading: action.payload,
+      };
+
+    case 'NEEDS_COMPANY_SETUP':
+      return {
+        ...state,
+        isLoading: false,
+        needsCompanySetup: true,
       };
 
     default:

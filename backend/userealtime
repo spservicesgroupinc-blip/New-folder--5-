@@ -1,0 +1,184 @@
+import { useEffect, useCallback } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useAppStore } from '@/store/appStore'
+
+// ─── RPC: complete_job ─────────────────────────────────────────────────────────
+// Add this to your Supabase Edge Function or as a Postgres function.
+// Mirrors handleCompleteJob's delta logic exactly.
+/*
+create or replace function complete_job(
+  p_estimate_id  uuid,
+  p_actuals      jsonb,
+  p_user_id      uuid
+) returns jsonb language plpgsql security definer as $$
+declare
+  v_est      estimates%rowtype;
+  v_counts   jsonb;
+  v_life     jsonb;
+  v_act_oc   numeric;
+  v_act_cc   numeric;
+  v_est_oc   numeric;
+  v_est_cc   numeric;
+  v_diff_oc  numeric;
+  v_diff_cc  numeric;
+begin
+  -- Lock estimate row to prevent double-processing
+  select * into v_est from estimates
+    where id = p_estimate_id and user_id = p_user_id
+    for update;
+
+  if not found then raise exception 'Estimate not found'; end if;
+
+  -- Idempotency guard (mirrors your SAFETY CHECK 1)
+  if v_est.execution_status = 'Completed' and v_est.inventory_processed then
+    return jsonb_build_object('success', true, 'message', 'Job already finalized');
+  end if;
+
+  -- Delta calc (mirrors your "Deduct DIFFERENCE between actual and estimated")
+  v_act_oc := coalesce((p_actuals->>'openCellSets')::numeric, 0);
+  v_act_cc := coalesce((p_actuals->>'closedCellSets')::numeric, 0);
+  v_est_oc := coalesce((v_est.json_data->'materials'->>'openCellSets')::numeric, 0);
+  v_est_cc := coalesce((v_est.json_data->'materials'->>'closedCellSets')::numeric, 0);
+  v_diff_oc := v_act_oc - v_est_oc;
+  v_diff_cc := v_act_cc - v_est_cc;
+
+  -- Update warehouse counts in company_settings
+  update company_settings set
+    warehouse_counts = jsonb_build_object(
+      'openCellSets',  greatest(0, (warehouse_counts->>'openCellSets')::numeric - v_diff_oc),
+      'closedCellSets', greatest(0, (warehouse_counts->>'closedCellSets')::numeric - v_diff_cc)
+    ),
+    lifetime_usage = jsonb_build_object(
+      'openCell',  coalesce((lifetime_usage->>'openCell')::numeric, 0) + v_act_oc,
+      'closedCell', coalesce((lifetime_usage->>'closedCell')::numeric, 0) + v_act_cc
+    ),
+    last_modified = now()
+  where user_id = p_user_id;
+
+  -- Delta-update individual inventory items
+  if p_actuals ? 'inventory' then
+    declare item jsonb; v_est_qty numeric; v_act_qty numeric;
+    begin
+      for item in select * from jsonb_array_elements(p_actuals->'inventory') loop
+        v_est_qty := coalesce((
+          select (el->>'quantity')::numeric
+          from jsonb_array_elements(v_est.json_data->'materials'->'inventory') el
+          where el->>'id' = item->>'id'
+          limit 1
+        ), 0);
+        v_act_qty := coalesce((item->>'quantity')::numeric, 0);
+
+        update inventory set
+          quantity = greatest(0, quantity - (v_act_qty - v_est_qty)),
+          last_modified = now()
+        where id = (item->>'id')::uuid and user_id = p_user_id;
+      end loop;
+    end;
+  end if;
+
+  -- Append material log rows
+  insert into material_logs (user_id, job_id, customer_name, material_name, quantity, unit, logged_by, completion_date)
+  values
+    (p_user_id, p_estimate_id, v_est.customer_name, 'Open Cell Foam',  v_act_oc, 'Sets',
+      coalesce(p_actuals->>'completedBy','Crew'), now()),
+    (p_user_id, p_estimate_id, v_est.customer_name, 'Closed Cell Foam', v_act_cc, 'Sets',
+      coalesce(p_actuals->>'completedBy','Crew'), now());
+
+  -- Final commit: mark completed (mirrors SAFETY CHECK flag)
+  update estimates set
+    execution_status     = 'Completed',
+    inventory_processed  = true,
+    actuals              = p_actuals,
+    last_modified        = now(),
+    json_data            = json_data ||
+      jsonb_build_object('executionStatus','Completed','inventoryProcessed',true,'actuals',p_actuals)
+  where id = p_estimate_id and user_id = p_user_id;
+
+  return jsonb_build_object('success', true);
+end;
+$$;
+*/
+
+// ─── React Hook ───────────────────────────────────────────────────────────────
+
+export function useRealtimeInventory(userId: string) {
+  const { setInventory, updateInventoryItem, setEstimates, updateEstimate } = useAppStore()
+
+  // Delta sync down — only fetch rows newer than last sync
+  const syncDown = useCallback(async (lastSyncTimestamp?: Date) => {
+    const since = lastSyncTimestamp?.toISOString() ?? new Date(0).toISOString()
+
+    const [{ data: inv }, { data: est }] = await Promise.all([
+      supabase
+        .from('inventory')
+        .select('*')
+        .eq('user_id', userId)
+        .gt('last_modified', since),
+      supabase
+        .from('estimates')
+        .select('*')
+        .eq('user_id', userId)
+        .gt('last_modified', since),
+    ])
+
+    if (inv?.length) setInventory(inv)
+    if (est?.length) setEstimates(est)
+  }, [userId, setInventory, setEstimates])
+
+  // Complete job — calls the atomic Postgres RPC
+  const completeJob = useCallback(async (estimateId: string, actuals: object) => {
+    const { data, error } = await supabase.rpc('complete_job', {
+      p_estimate_id: estimateId,
+      p_actuals:     actuals,
+      p_user_id:     userId,
+    })
+    if (error) throw error
+    return data
+  }, [userId])
+
+  // Realtime subscription — admin dashboard receives live inventory + estimate changes
+  useEffect(() => {
+    const channel = supabase.channel(`rfe_company_${userId}`)
+
+      // Inventory row updated (e.g. crew completed a job)
+      .on(
+        'postgres_changes',
+        {
+          event:  'UPDATE',
+          schema: 'public',
+          table:  'inventory',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          console.log('[Realtime] inventory update', payload.new)
+          updateInventoryItem(payload.new as any)
+        }
+      )
+
+      // Estimate status changed (In Progress → Completed)
+      .on(
+        'postgres_changes',
+        {
+          event:  'UPDATE',
+          schema: 'public',
+          table:  'estimates',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const updated = payload.new as any
+          console.log('[Realtime] estimate update', updated.id, updated.execution_status)
+          updateEstimate(updated)
+        }
+      )
+
+      .subscribe((status) => {
+        console.log('[Realtime] channel status:', status)
+      })
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [userId, updateInventoryItem, updateEstimate])
+
+  return { syncDown, completeJob }
+}

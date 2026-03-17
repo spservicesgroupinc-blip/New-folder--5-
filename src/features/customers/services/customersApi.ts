@@ -1,21 +1,66 @@
 /**
  * customersApi.ts
  *
- * Thin wrapper for persisting customer data via the full-state syncUp call.
- * There is no standalone customer endpoint; customers are saved as part of
- * the complete CalculatorState payload.
+ * Supabase CRUD operations for customers. RLS automatically scopes
+ * all queries to the current user's company.
  */
 
-import { syncUp } from '../../../shared/services/api/sheetsApi';
-import type { CalculatorState } from '../../../../types';
+import { supabase } from '../../../shared/services/supabase';
+import type {
+  Customer,
+  CustomerInsert,
+  CustomerUpdate,
+} from '../../../shared/types/database.types';
 
-/**
- * Persists the current application state (including the customers array) to
- * the backing Google Sheet.
- */
-export const apiSaveCustomers = async (
-  state: CalculatorState,
-  spreadsheetId: string,
-): Promise<boolean> => {
-  return syncUp(state, spreadsheetId);
-};
+export async function fetchCustomers(): Promise<Customer[]> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .order('name');
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function fetchCustomerById(id: number): Promise<Customer | null> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function createCustomer(customer: CustomerInsert): Promise<Customer> {
+  const { data, error } = await supabase
+    .from('customers')
+    .insert(customer)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateCustomer(id: number, updates: CustomerUpdate): Promise<Customer> {
+  const { data, error } = await supabase
+    .from('customers')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCustomer(id: number): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .delete()
+    .eq('id', id);
+
+  if (error) throw error;
+}

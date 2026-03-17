@@ -1,71 +1,72 @@
 /**
  * usePermissions.ts
  *
- * Role-based permission helper. Admin has full access. Crew members have
- * read/write on a subset of resources and no access to sensitive ones.
+ * Role-based permission helper. Admin has full access. Non-admin roles
+ * (crew, supervisor, technician, helper) have limited access based on
+ * an explicit allowlist.
  */
 
 import { useAuth } from './useAuth';
+import type { MemberRole } from '../../../shared/types/database.types';
 
 // ---------------------------------------------------------------------------
-// Permission matrix for crew members
+// Permission matrix
 // ---------------------------------------------------------------------------
 
 type Action = 'read' | 'write' | 'delete';
 
 /**
- * Resources that crew members are explicitly DENIED access to, regardless of
- * action. Enumerated here (rather than relying on map absence) so that denials
- * are audit-visible and cannot be accidentally bypassed by adding a key to
- * CREW_ALLOWED.
+ * Resources that non-admin roles are explicitly DENIED access to.
  */
-const CREW_DENIED_RESOURCES = new Set<string>(['settings', 'customers', 'inventory']);
+const NON_ADMIN_DENIED_RESOURCES = new Set<string>([
+  'settings',
+  'company',
+  'members',
+  'profit_loss',
+]);
 
 /**
- * Resources crew members are allowed to read/write (but never delete).
- * `delete` is explicitly denied for all resources — see can() below.
+ * Resources non-admin roles can access, and which actions are allowed.
+ * Supervisors get broader write access than technicians/helpers.
  */
-const CREW_ALLOWED: Map<string, Action[]> = new Map([
-  ['estimates', ['read', 'write']],
-  ['time',      ['read', 'write']],
-  ['photos',    ['read', 'write']],
-]);
+const ROLE_PERMISSIONS: Record<string, Partial<Record<MemberRole, Action[]>>> = {
+  estimates:   { crew: ['read', 'write'], supervisor: ['read', 'write'], technician: ['read'], helper: ['read'] },
+  customers:   { crew: ['read'], supervisor: ['read', 'write'], technician: ['read'], helper: ['read'] },
+  inventory:   { crew: ['read'], supervisor: ['read', 'write'], technician: ['read'], helper: ['read'] },
+  equipment:   { crew: ['read', 'write'], supervisor: ['read', 'write'], technician: ['read', 'write'], helper: ['read'] },
+  time:        { crew: ['read', 'write'], supervisor: ['read', 'write'], technician: ['read', 'write'], helper: ['read', 'write'] },
+  photos:      { crew: ['read', 'write'], supervisor: ['read', 'write'], technician: ['read', 'write'], helper: ['read', 'write'] },
+  materials:   { crew: ['read'], supervisor: ['read', 'write'], technician: ['read'], helper: ['read'] },
+};
 
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
 export function usePermissions() {
-  const { isAdmin, isCrew } = useAuth();
+  const { isAdmin, session } = useAuth();
+  const role = session?.company.role ?? null;
 
-  /**
-   * Returns true if the current session is allowed to perform `action` on
-   * `resource`. Unauthenticated users are denied everything.
-   *
-   * Evaluation order for crew:
-   *   1. Explicitly denied resources → false
-   *   2. Explicitly denied action (delete) → false
-   *   3. Allowed resource + action map → result
-   *   4. Anything else → false
-   */
   function can(action: Action, resource: string): boolean {
     if (isAdmin) return true;
+    if (!role) return false;
 
-    if (isCrew) {
-      // 1. Explicit resource denial
-      if (CREW_DENIED_RESOURCES.has(resource)) return false;
-      // 2. Explicit action denial — crew may never delete anything
-      if (action === 'delete') return false;
-      // 3. Check allowed map
-      return CREW_ALLOWED.get(resource)?.includes(action) ?? false;
-    }
+    // Explicit resource denial for non-admins
+    if (NON_ADMIN_DENIED_RESOURCES.has(resource)) return false;
 
-    return false;
+    // Non-admins may never delete
+    if (action === 'delete') return false;
+
+    // Check role-specific permissions
+    const resourcePerms = ROLE_PERMISSIONS[resource];
+    if (!resourcePerms) return false;
+
+    return resourcePerms[role]?.includes(action) ?? false;
   }
 
   return {
     can,
     isAdmin,
-    isCrew,
+    role,
   };
 }

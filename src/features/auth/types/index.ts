@@ -1,6 +1,6 @@
 export type {
-  User,
   UserRole,
+  CompanyContext,
   UserSession,
   Permission,
   AuthState,
