@@ -2,7 +2,7 @@
 import React from 'react';
 import { useCalculator, DEFAULT_STATE } from '../context/CalculatorContext';
 import { EstimateRecord, CalculationResults, CustomerProfile, PurchaseOrder, InvoiceLineItem } from '../types';
-import { deleteEstimate, markJobPaid, syncUp } from '../services/api';
+import { deleteEstimate, markJobPaid, syncUp, saveEstimateToSupabase, saveCustomerToSupabase } from '../services/api';
 import { generateWorkOrderPDF, generateDocumentPDF } from '../utils/pdfGenerator';
 
 export const useEstimates = () => {
@@ -102,7 +102,20 @@ export const useEstimates = () => {
 
     dispatch({ type: 'UPDATE_DATA', payload: { savedEstimates: updatedEstimates } });
     dispatch({ type: 'SET_EDITING_ESTIMATE', payload: estimateId });
-    
+
+    // Fire-and-forget Supabase sync (don't block the UI)
+    if (session?.companyId) {
+      saveEstimateToSupabase(newEstimate, session.companyId).then((supabaseId) => {
+        if (supabaseId && supabaseId !== estimateId) {
+          // Update local state with the real Supabase integer ID
+          dispatch({ type: 'UPDATE_SAVED_ESTIMATE', payload: { ...newEstimate, id: supabaseId } });
+          dispatch({ type: 'SET_EDITING_ESTIMATE', payload: supabaseId });
+        }
+      }).catch((err) => {
+        console.error('Failed to sync estimate to Supabase:', err);
+      });
+    }
+
     // Check for implicit customer creation
     if (!appData.customers.find(c => c.id === appData.customerProfile.id)) {
         const newCustomer = { ...appData.customerProfile, id: appData.customerProfile.id || Math.random().toString(36).substr(2, 9) };
@@ -173,6 +186,20 @@ export const useEstimates = () => {
         dispatch({ type: 'UPDATE_DATA', payload: { customers: updatedCustomers, customerProfile: customerData } });
     } else {
         dispatch({ type: 'UPDATE_DATA', payload: { customers: updatedCustomers } });
+    }
+
+    if (session?.companyId) {
+      saveCustomerToSupabase(customerData, session.companyId).then((supabaseId) => {
+        if (supabaseId && supabaseId !== customerData.id) {
+          // Update customers list with real Supabase ID
+          const updatedCustomers = appData.customers.map(c =>
+            c.id === customerData.id ? { ...c, id: supabaseId } : c
+          );
+          dispatch({ type: 'UPDATE_DATA', payload: { customers: updatedCustomers } });
+        }
+      }).catch((err) => {
+        console.error('Failed to sync customer to Supabase:', err);
+      });
     }
   };
 

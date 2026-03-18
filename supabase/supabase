@@ -1,0 +1,73 @@
+Data API
+Project URL
+https://uygjdlbvipbjhldtlgin.supabase.co
+
+Copy
+Publishable Key
+sb_publishable_TskJekRP-KLNCwmuBkADGA_50KjKTa9
+
+Copy
+Database
+Direct connection stringPlan: Fix Supabase Sync — Offline Popup Root Cause
+The app shows "Offline" in the sidebar and error toasts because of 5 cascading failures in the Supabase integration chain. The database schema, RLS policies, and functions are all correctly deployed — but the app can never reach them.
+
+Root Causes Found (via MCP inspection + code review)
+1. No .env file — Supabase client connects to a placeholder
+
+Only .env.example exists with VITE_SUPABASE_ANON_KEY=your-anon-key-here
+supabaseClient.ts falls back to https://placeholder.supabase.co + placeholder-key
+Every Supabase query silently fails → syncDown() returns null → triggers "Offline Mode" toast
+2. No company data exists in the database
+
+MCP confirmed: companies = 0 rows, company_members = 0 rows, company_settings = 0 rows
+2 auth users exist but neither has a company → get_user_company_id() returns NULL → RLS blocks everything
+3. Edge functions not deployed
+
+create-company and invite-crew exist as code in functions but mcp_supabase_list_edge_functions returns empty → signup can't create a company → new users are stuck
+4. Entry point loads the OLD app — new auth system is never used
+
+index.tsx imports root App.tsx which renders SprayFoamCalculator directly
+The new App.tsx with AuthProvider, AppShell, AppRouter is never loaded
+The "Offline" text the user sees comes from Layout.tsx:226: syncStatus === 'error' && 'Offline'
+5. syncDown() doesn't check isSupabaseConfigured before querying
+
+supabaseClient.ts exports isSupabaseConfigured but api.ts never checks it → fires queries against the placeholder URL → fails → user sees "offline"
+Steps
+Phase 1: Environment & Credentials (blocking — must be first)
+
+Create .env with real Supabase URL (https://uygjdlbvipbjhldtlgin.supabase.co) and the real anon key (retrieved from MCP). Add .env to .gitignore
+If deployed to Vercel, set the same env vars in Vercel project settings
+Phase 2: Bootstrap Data (parallel with Phase 3)
+3. Deploy create-company and invite-crew edge functions
+4. Create a company + company_member row for the existing user (russellconstruction9@gmail.com) — either via the deployed edge function or direct SQL
+5. Seed default company_settings for the new company
+
+Phase 3: Fix Code Wiring (parallel with Phase 2)
+6. Guard syncDown()/syncUp() in api.ts with isSupabaseConfigured check — return null/false immediately if not configured, with a console warning
+7. Ensure loginUser() in api.ts:306 properly signs in and the Supabase client auto-attaches the JWT (this already happens via supabase.auth.signInWithPassword() — the client stores the session and attaches it to subsequent requests)
+8. Verify that after login, syncDown() runs with the authenticated session (the Supabase JS client handles this automatically once signInWithPassword succeeds)
+
+Phase 4: Verification
+9. Sign in → verify loginUser() returns a valid session with company context
+10. Verify syncDown() returns real data (settings, empty estimates/customers) instead of null
+11. Verify sidebar shows "Synced" / "Active" instead of "Offline"
+12. Test syncUp() — change a setting and verify it appears in company_settings via MCP
+
+Relevant Files
+.env.example — needs real .env counterpart
+supabaseClient.ts — isSupabaseConfigured flag (unused)
+api.ts — syncDown(), syncUp(), loginUser(), signupUser()
+useSync.ts — sync orchestration, triggers "Offline" status
+Layout.tsx:226 — displays "Offline" when syncStatus === 'error'
+LoginPage.tsx — calls loginUser() from api.ts
+index.tsx — entry point (imports root App.tsx, not App.tsx)
+index.ts — not deployed
+index.ts — not deployed
+Verification
+After .env created: browser console should NOT show [Supabase] Missing required environment variables
+After company seeded: SELECT * FROM companies via MCP returns 1+ rows
+After login: Network tab shows Supabase REST requests returning 200 with data (not 401/empty)
+After sync: sidebar sync indicator shows "Synced" then "Active" — no error toast
+Decisions
+The current active app uses api.ts loginUser() which correctly calls supabase.auth.signInWithPassword() — once .env is fixed and company data exists, the auth + RLS chain will work
+The new app architecture is complete but not wired in yet (tracked in REBUILD_PLAN.md tasks 8+). Fixing sync doesn't require switching to it — the legacy SprayFoamCalculator flow already uses Supabase Auth correctly, it just has no credentials/data to work wit

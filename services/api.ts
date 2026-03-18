@@ -1,6 +1,6 @@
 
 import { supabase } from '../src/shared/services/supabase/supabaseClient';
-import { CalculatorState, EstimateRecord, UserSession } from '../types';
+import { CalculatorState, CustomerProfile, EstimateRecord, UserSession } from '../types';
 
 /**
  * Fetches the full application state from Supabase
@@ -142,6 +142,55 @@ export const syncUp = async (state: CalculatorState): Promise<boolean> => {
       .upsert(upserts, { onConflict: 'company_id,key' });
 
     if (error) throw error;
+
+    // Sync inventory_items — split into upsert (numeric IDs) and insert (local IDs)
+    const isNumericId = (id: string) =>
+      !isNaN(parseInt(id, 10)) && String(parseInt(id, 10)) === id;
+
+    const itemsWithDbId = state.warehouse.items
+      .filter((item) => isNumericId(item.id))
+      .map((item) => ({
+        id: parseInt(item.id, 10),
+        company_id: companyId,
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+        unit_cost: item.unitCost,
+      }));
+
+    const itemsWithLocalId = state.warehouse.items
+      .filter((item) => !isNumericId(item.id))
+      .map((item) => ({
+        company_id: companyId,
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+        unit_cost: item.unitCost,
+      }));
+
+    const inventoryOps: Promise<any>[] = [];
+    if (itemsWithDbId.length > 0) {
+      inventoryOps.push(
+        supabase
+          .from('inventory_items')
+          .upsert(itemsWithDbId, { onConflict: 'id' })
+          .then(({ error: e }) => {
+            if (e) console.error('syncUp inventory upsert error:', e);
+          }),
+      );
+    }
+    if (itemsWithLocalId.length > 0) {
+      inventoryOps.push(
+        supabase
+          .from('inventory_items')
+          .insert(itemsWithLocalId)
+          .then(({ error: e }) => {
+            if (e) console.error('syncUp inventory insert error:', e);
+          }),
+      );
+    }
+    await Promise.all(inventoryOps);
+
     return true;
   } catch (error) {
     console.error("syncUp error:", error);
@@ -379,4 +428,142 @@ export const signupUser = async (username: string, password: string, companyName
 export const submitTrial = async (name: string, email: string, phone: string): Promise<boolean> => {
   const { error } = await supabase.from('trial_leads').insert({ name, email, phone });
   return !error;
+};
+
+/**
+ * Saves an EstimateRecord to the Supabase `estimates` table.
+ * - If the estimate has a numeric string ID (came from DB), performs an UPDATE.
+ * - If the estimate has a non-numeric local ID, performs an INSERT and returns
+ *   the newly assigned Supabase integer ID as a string.
+ *
+ * @param estimate  - The EstimateRecord to persist.
+ * @param companyId - The company ID from the current user session.
+ * @returns The Supabase row ID as a string on success, or null on failure.
+ */
+export const saveEstimateToSupabase = async (
+  estimate: EstimateRecord,
+  companyId: string | number,
+): Promise<string | null> => {
+  try {
+    const isNumericId =
+      !isNaN(parseInt(estimate.id, 10)) && String(parseInt(estimate.id, 10)) === estimate.id;
+
+    const customerId = isNaN(parseInt(estimate.customerId, 10))
+      ? null
+      : parseInt(estimate.customerId, 10);
+
+    const payload = {
+      company_id: companyId,
+      customer_id: customerId,
+      date: estimate.date,
+      status: estimate.status,
+      execution_status: estimate.executionStatus,
+      total_value: estimate.totalValue,
+      inputs: { ...estimate.inputs, customer: estimate.customer },
+      results: estimate.results,
+      materials: estimate.materials,
+      wall_settings: estimate.wallSettings,
+      roof_settings: estimate.roofSettings,
+      expenses: estimate.expenses,
+      job_notes: estimate.notes,
+      pricing_mode: estimate.pricingMode,
+      sqft_rates: estimate.sqFtRates,
+      scheduled_date: estimate.scheduledDate,
+      invoice_date: estimate.invoiceDate,
+      invoice_number: estimate.invoiceNumber,
+      payment_terms: estimate.paymentTerms,
+      estimate_lines: estimate.estimateLines,
+      invoice_lines: estimate.invoiceLines,
+      work_order_lines: estimate.workOrderLines,
+      actuals: estimate.actuals,
+      financials: estimate.financials,
+      work_order_url: estimate.workOrderSheetUrl,
+      pdf_url: estimate.pdfLink,
+      site_photos: estimate.sitePhotos,
+      inventory_processed: estimate.inventoryProcessed,
+    };
+
+    if (isNumericId) {
+      const { company_id: _, ...updatePayload } = payload;
+      const { data: updatedRow, error } = await supabase
+        .from('estimates')
+        .update(updatePayload)
+        .eq('id', parseInt(estimate.id, 10))
+        .eq('company_id', companyId)
+        .select('id')
+        .single();
+      if (error) throw error;
+      if (!updatedRow) throw new Error(`UPDATE matched 0 rows for estimate id=${estimate.id}`);
+      return estimate.id;
+    } else {
+      const { data, error } = await supabase
+        .from('estimates')
+        .insert(payload)
+        .select('id')
+        .single();
+      if (error) throw error;
+      return String(data.id);
+    }
+  } catch (error) {
+    console.error('saveEstimateToSupabase error:', error);
+    return null;
+  }
+};
+
+/**
+ * Saves a CustomerProfile to the Supabase `customers` table.
+ * - If the customer has a numeric string ID (came from DB), performs an UPDATE.
+ * - If the customer has a non-numeric local ID, performs an INSERT and returns
+ *   the newly assigned Supabase integer ID as a string.
+ *
+ * @param customer  - The CustomerProfile to persist.
+ * @param companyId - The company ID from the current user session.
+ * @returns The Supabase row ID as a string on success, or null on failure.
+ */
+export const saveCustomerToSupabase = async (
+  customer: CustomerProfile,
+  companyId: string | number,
+): Promise<string | null> => {
+  try {
+    const isNumericId =
+      !isNaN(parseInt(customer.id, 10)) && String(parseInt(customer.id, 10)) === customer.id;
+
+    const payload = {
+      company_id: companyId,
+      name: customer.name,
+      address: customer.address,
+      city: customer.city,
+      state: customer.state,
+      zip: customer.zip,
+      phone: customer.phone,
+      email: customer.email,
+      notes: customer.notes,
+      status: customer.status,
+    };
+
+    if (isNumericId) {
+      const { company_id: _, ...updatePayload } = payload;
+      const { data: updatedRow, error } = await supabase
+        .from('customers')
+        .update(updatePayload)
+        .eq('id', parseInt(customer.id, 10))
+        .eq('company_id', companyId)
+        .select('id')
+        .single();
+      if (error) throw error;
+      if (!updatedRow) throw new Error(`UPDATE matched 0 rows for customer id=${customer.id}`);
+      return customer.id;
+    } else {
+      const { data, error } = await supabase
+        .from('customers')
+        .insert(payload)
+        .select('id')
+        .single();
+      if (error) throw error;
+      return String(data.id);
+    }
+  } catch (error) {
+    console.error('saveCustomerToSupabase error:', error);
+    return null;
+  }
 };
