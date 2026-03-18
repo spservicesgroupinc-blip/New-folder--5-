@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { useCalculator, DEFAULT_STATE } from '../context/CalculatorContext';
 import { syncUp, syncDown } from '../services/api';
+import { supabase } from '../src/shared/services/supabase/supabaseClient';
 
 export const useSync = () => {
   const { state, dispatch } = useCalculator();
@@ -11,19 +12,40 @@ export const useSync = () => {
 
   // 1. SESSION RECOVERY
   useEffect(() => {
-    const savedSession = localStorage.getItem('foamProSession');
-    if (savedSession) {
-      try {
-        const parsedSession = JSON.parse(savedSession);
-        dispatch({ type: 'SET_SESSION', payload: parsedSession });
-        dispatch({ type: 'SET_TRIAL_ACCESS', payload: true });
-      } catch (e) {
-        localStorage.removeItem('foamProSession');
+    (async () => {
+      const savedSession = localStorage.getItem('foamProSession');
+      if (savedSession) {
+        try {
+          const parsedSession = JSON.parse(savedSession);
+          dispatch({ type: 'SET_SESSION', payload: parsedSession });
+          dispatch({ type: 'SET_TRIAL_ACCESS', payload: true });
+
+          // Validate that the Supabase JWT is still active
+          try {
+            const { data: { session: supabaseSession } } = await supabase.auth.getSession();
+            if (!supabaseSession) {
+              const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+              if (refreshError || !refreshed.session) {
+                // Session expired — force re-login
+                localStorage.removeItem('foamProSession');
+                dispatch({ type: 'LOGOUT' });
+                dispatch({ type: 'SET_LOADING', payload: false });
+                dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'error', message: 'Session expired. Please log in again.' } });
+                return;
+              }
+            }
+          } catch (authErr) {
+            console.warn('Could not validate Supabase session:', authErr);
+            // Don't block — let syncDown attempt and fail gracefully if needed
+          }
+        } catch (e) {
+          localStorage.removeItem('foamProSession');
+        }
+      } else {
+          // If no session, ensure loading stops
+          dispatch({ type: 'SET_LOADING', payload: false });
       }
-    } else {
-        // If no session, ensure loading stops
-        dispatch({ type: 'SET_LOADING', payload: false });
-    }
+    })();
   }, [dispatch]);
 
   // 2. CLOUD-FIRST INITIALIZATION
@@ -74,22 +96,28 @@ export const useSync = () => {
           }
       } catch (e) {
           console.error("Cloud sync failed:", e);
-          
-          // Fallback: If cloud fails (offline), try Local Storage
+
+          // Fallback: If cloud fails, try Local Storage
           const localSaved = localStorage.getItem(`foamProState_${session.username}`);
-          
+
           if (localSaved) {
               const localState = JSON.parse(localSaved);
               dispatch({ type: 'LOAD_DATA', payload: localState });
               dispatch({ type: 'SET_INITIALIZED', payload: true });
               dispatch({ type: 'SET_SYNC_STATUS', payload: 'error' }); // Warning state
-              dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'error', message: 'Offline Mode: Using local backup.' } });
+              const offlineMsg = !navigator.onLine
+                ? 'Offline Mode: Using local backup.'
+                : 'Cloud sync failed. Using local data.';
+              dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'error', message: offlineMsg } });
           } else {
               // Critical Error: No Cloud and No Local Backup.
               dispatch({ type: 'LOAD_DATA', payload: DEFAULT_STATE });
               dispatch({ type: 'SET_INITIALIZED', payload: true });
               dispatch({ type: 'SET_SYNC_STATUS', payload: 'error' });
-              dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'error', message: 'Sync Failed. Check Internet Connection.' } });
+              const noBackupMsg = !navigator.onLine
+                ? 'Offline. No local backup found.'
+                : 'Could not connect to database.';
+              dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'error', message: noBackupMsg } });
           }
       } finally {
           dispatch({ type: 'SET_LOADING', payload: false });
