@@ -1,10 +1,14 @@
 
-const CACHE_NAME = 'rfe-foam-pro-v11-desktop';
+const CACHE_NAME = 'rfe-foam-pro-v12';
 const URLS_TO_CACHE = [
-  './',
-  './index.html',
-  './manifest.json',
-  'https://cdn-icons-png.flaticon.com/512/10473/10473634.png'
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-192-maskable.png',
+  '/icons/icon-512-maskable.png',
+  '/icons/apple-touch-icon.png'
 ];
 
 // Install Event: Cache critical app shell
@@ -12,7 +16,7 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('Opened cache');
+        console.log('[SW] Caching app shell');
         return cache.addAll(URLS_TO_CACHE);
       })
       .then(() => self.skipWaiting())
@@ -26,7 +30,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
           if (cacheName !== CACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
+            console.log('[SW] Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
@@ -36,50 +40,48 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event: Stale-While-Revalidate Strategy
+// Fetch Event: Mixed strategy
 self.addEventListener('fetch', (event) => {
-  // 1. Handle Navigation (HTML) - Network First for freshness, Fallback to Cache
+  const url = new URL(event.request.url);
+
+  // Skip non-GET requests
+  if (event.request.method !== 'GET') return;
+
+  // Skip cross-origin requests (except same-site icons already cached)
+  if (url.origin !== self.location.origin) return;
+
+  // 1. Navigation (HTML): Network-First, fallback to cached index.html for SPA
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-            return caches.open(CACHE_NAME).then((cache) => {
-                cache.put(event.request, response.clone());
-                return response;
-            });
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
         })
-        .catch(() => {
-          return caches.match('./index.html');
-        })
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
 
-  // 2. Handle API calls (Google Script) - Network Only (Don't cache dynamic data)
-  if (event.request.url.includes('script.google.com')) {
-      return; // Let browser handle normally
-  }
-
-  // 3. Handle Assets (JS, CSS, Images) - Stale-While-Revalidate
-  // Serve from cache immediately, then update cache from network in background
+  // 2. Static assets: Stale-While-Revalidate
   event.respondWith(
-    caches.match(event.request)
-      .then((cachedResponse) => {
-        const fetchPromise = fetch(event.request).then((networkResponse) => {
-           // Check if valid response
-           if(networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-               const responseToCache = networkResponse.clone();
-               caches.open(CACHE_NAME).then((cache) => {
-                   cache.put(event.request, responseToCache);
-               });
-           }
-           return networkResponse;
-        }).catch(() => {
-            // Network failed, nothing to do (we already returned cache if available)
-        });
+    caches.match(event.request).then((cachedResponse) => {
+      const fetchPromise = fetch(event.request)
+        .then((networkResponse) => {
+          if (
+            networkResponse &&
+            networkResponse.status === 200 &&
+            networkResponse.type === 'basic'
+          ) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return networkResponse;
+        })
+        .catch(() => undefined);
 
-        // Return cached response immediately if available, otherwise wait for network
-        return cachedResponse || fetchPromise;
-      })
+      return cachedResponse || fetchPromise;
+    })
   );
 });
