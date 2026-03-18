@@ -1,8 +1,17 @@
 /// <reference lib="webworker" />
 
-export const CACHE_NAME = 'rfe-foam-pro-v10-desktop';
+export const CACHE_NAME = 'rfe-foam-pro-v12';
 
-export const URLS_TO_PRECACHE = ['./index.html', './manifest.json', './'];
+export const URLS_TO_PRECACHE = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-192-maskable.png',
+  '/icons/icon-512-maskable.png',
+  '/icons/apple-touch-icon.png',
+];
 
 /**
  * Handles fetch events using a mixed strategy:
@@ -21,7 +30,7 @@ export function handleFetch(event: FetchEvent): void {
             return response;
           });
         })
-        .catch(() => caches.match('./index.html') as Promise<Response>)
+        .catch(() => caches.match('/index.html') as Promise<Response>)
     );
     return;
   }

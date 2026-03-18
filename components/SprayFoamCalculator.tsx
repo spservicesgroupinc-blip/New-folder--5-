@@ -1,6 +1,6 @@
 
 import React, { useMemo, useEffect, useState } from 'react';
-import { Loader2, Download, X } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { 
   CalculationMode, 
   EstimateRecord,
@@ -19,6 +19,7 @@ import { syncUp } from '../services/api';
 import LoginPage from './LoginPage';
 import { LandingPage } from './LandingPage';
 import { Layout } from './Layout';
+import { PWAInstallBanner } from './PWAInstallBanner';
 import { Calculator } from './Calculator';
 import { Dashboard } from './Dashboard';
 import { Warehouse } from './Warehouse';
@@ -296,19 +297,29 @@ const SprayFoamCalculator: React.FC = () => {
   };
 
   if (!ui.hasTrialAccess && !session) {
-      return <LandingPage onEnterApp={() => dispatch({ type: 'SET_TRIAL_ACCESS', payload: true })} />;
+      return (
+        <>
+          <LandingPage onEnterApp={() => dispatch({ type: 'SET_TRIAL_ACCESS', payload: true })} />
+          <PWAInstallBanner deferredPrompt={deferredPrompt} onInstall={handleInstallApp} />
+        </>
+      );
   }
 
   if (!session) {
-      return <LoginPage 
-          onLoginSuccess={(s) => { 
-              dispatch({ type: 'SET_SESSION', payload: s }); 
-              localStorage.setItem('foamProSession', JSON.stringify(s)); 
-              localStorage.setItem('foamProTrialAccess', 'true');
-          }} 
-          installPrompt={deferredPrompt}
-          onInstall={handleInstallApp}
-      />;
+      return (
+        <>
+          <LoginPage 
+              onLoginSuccess={(s) => { 
+                  dispatch({ type: 'SET_SESSION', payload: s }); 
+                  localStorage.setItem('foamProSession', JSON.stringify(s)); 
+                  localStorage.setItem('foamProTrialAccess', 'true');
+              }} 
+              installPrompt={deferredPrompt}
+              onInstall={handleInstallApp}
+          />
+          <PWAInstallBanner deferredPrompt={deferredPrompt} onInstall={handleInstallApp} />
+        </>
+      );
   }
 
   if (ui.isLoading) return <div className="flex h-screen items-center justify-center text-slate-400 bg-slate-900"><Loader2 className="animate-spin mr-2"/> Initializing Enterprise Workspace...</div>;
@@ -340,24 +351,8 @@ const SprayFoamCalculator: React.FC = () => {
       installPrompt={deferredPrompt}
       onInstall={handleInstallApp}
     >
-        {/* Persistent Floating Install Icon */}
-        {deferredPrompt && (
-          <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-bottom-10 fade-in duration-500">
-             <button 
-                onClick={handleInstallApp}
-                className="group flex items-center gap-3 bg-slate-900 text-white pl-4 pr-6 py-4 rounded-full shadow-2xl border-2 border-slate-700 hover:bg-brand hover:border-brand transition-all hover:scale-105 active:scale-95"
-                title="Install Desktop App"
-             >
-                <div className="bg-white/10 p-1.5 rounded-full group-hover:bg-white/20 transition-colors">
-                    <Download className="w-5 h-5 animate-pulse" />
-                </div>
-                <div className="flex flex-col items-start">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 group-hover:text-white/80 transition-colors leading-none mb-0.5">Desktop App</span>
-                    <span className="font-bold text-sm leading-none">Install Now</span>
-                </div>
-             </button>
-          </div>
-        )}
+        {/* PWA Install Banner — handles Chrome/Android and iOS Safari */}
+        <PWAInstallBanner deferredPrompt={deferredPrompt} onInstall={handleInstallApp} />
 
         {ui.view === 'dashboard' && (
             <Dashboard 
