@@ -311,8 +311,6 @@ export interface CalculatorState {
 export interface UserSession {
   username: string;
   companyName: string;
-  spreadsheetId: string;
-  folderId?: string;
-  token?: string;
+  companyId?: number;
   role: 'admin' | 'crew'; 
 }

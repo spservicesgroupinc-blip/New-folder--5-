@@ -2,7 +2,7 @@
 import React from 'react';
 import { useCalculator, DEFAULT_STATE } from '../context/CalculatorContext';
 import { EstimateRecord, CalculationResults, CustomerProfile, PurchaseOrder, InvoiceLineItem } from '../types';
-import { deleteEstimate, markJobPaid, createWorkOrderSheet, syncUp } from '../services/api';
+import { deleteEstimate, markJobPaid, syncUp } from '../services/api';
 import { generateWorkOrderPDF, generateDocumentPDF } from '../utils/pdfGenerator';
 
 export const useEstimates = () => {
@@ -134,9 +134,9 @@ export const useEstimates = () => {
           dispatch({ type: 'SET_EDITING_ESTIMATE', payload: null }); 
           dispatch({ type: 'SET_VIEW', payload: 'dashboard' }); 
       }
-      if (session?.spreadsheetId) {
+      if (session) {
           try {
-              await deleteEstimate(id, session.spreadsheetId);
+              await deleteEstimate(id);
               dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'success', message: 'Job Deleted' } });
           } catch (err) {
               dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'error', message: 'Local delete success, but server failed.' } });
@@ -150,7 +150,7 @@ export const useEstimates = () => {
       if (estimate) {
          dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'success', message: 'Processing Payment & P&L...' } });
          dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
-         const result = await markJobPaid(id, session?.spreadsheetId || '');
+         const result = await markJobPaid(id);
          if (result.success && result.estimate) {
              const updatedEstimates = appData.savedEstimates.map(e => e.id === id ? result.estimate! : e);
              dispatch({ type: 'UPDATE_DATA', payload: { savedEstimates: updatedEstimates } });
@@ -218,26 +218,14 @@ export const useEstimates = () => {
   };
 
   const handleBackgroundWorkOrderGeneration = async (record: EstimateRecord, currentWarehouse: any) => {
-      if (!session?.spreadsheetId) return;
+      if (!session) return;
       
       dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
       
       try {
-          // Create Standalone Sheet for Crew Log (Slow API Call)
-          const woUrl = await createWorkOrderSheet(record, session.folderId, session.spreadsheetId);
-          
           let finalRecord = record;
-          if (woUrl) {
-              finalRecord = { ...record, workOrderSheetUrl: woUrl };
-              // Update local state with the new URL
-              dispatch({ type: 'UPDATE_SAVED_ESTIMATE', payload: finalRecord });
-          }
           
           // Construct state snapshot for sync
-          // Note: We use the captured warehouse and construct the estimate list based on current `appData` logic
-          // Be aware: `appData` inside this closure refers to the state when `confirmWorkOrder` was called initially.
-          // This is generally safe for this flow as user just navigated.
-          
           let currentCustomers = [...appData.customers];
           if (!currentCustomers.find(c => c.id === record.customer.id)) {
               currentCustomers.push(record.customer);
@@ -255,10 +243,10 @@ export const useEstimates = () => {
               savedEstimates: freshEstimates
           };
 
-          await syncUp(updatedState, session.spreadsheetId);
+          await syncUp(updatedState);
           
           dispatch({ type: 'SET_SYNC_STATUS', payload: 'idle' });
-          dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'success', message: 'Work Order & Sheet Synced Successfully' } });
+          dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'success', message: 'Work Order Synced Successfully' } });
 
       } catch (e) {
           console.error("Background WO Sync Error", e);
@@ -285,10 +273,10 @@ export const useEstimates = () => {
       dispatch({ type: 'SET_NOTIFICATION', payload: { type: 'success', message: 'Order Saved & Stock Updated' } });
       dispatch({ type: 'SET_VIEW', payload: 'warehouse' });
       
-      if (session?.spreadsheetId) {
+      if (session) {
           dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
           const updatedState = { ...appData, warehouse: newWarehouse, purchaseOrders: updatedPOs };
-          await syncUp(updatedState, session.spreadsheetId);
+          await syncUp(updatedState);
           dispatch({ type: 'SET_SYNC_STATUS', payload: 'idle' });
       }
   };

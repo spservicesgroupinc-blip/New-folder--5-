@@ -9,11 +9,10 @@ interface ProfileProps {
   onUpdateProfile: (field: string, value: string) => void;
   onManualSync: () => void;
   syncStatus: string;
-  username?: string; // Passed from session to display Company ID
-  spreadsheetId?: string; // Needed for upload auth
+  username?: string;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ state, onUpdateProfile, onManualSync, syncStatus, username, spreadsheetId }) => {
+export const Profile: React.FC<ProfileProps> = ({ state, onUpdateProfile, onManualSync, syncStatus, username }) => {
   const [isUploading, setIsUploading] = useState(false);
 
   const copyToClipboard = (text: string) => {
@@ -36,15 +35,11 @@ export const Profile: React.FC<ProfileProps> = ({ state, onUpdateProfile, onManu
         reader.onloadend = async () => {
             const base64 = reader.result as string;
             
-            if (spreadsheetId) {
-                const url = await uploadImage(base64, spreadsheetId, "company_logo.jpg");
-                if (url) {
-                    onUpdateProfile('logoUrl', url);
-                } else {
-                    alert("Upload failed. Please try again.");
-                }
+            const url = await uploadImage(base64, "company_logo.jpg");
+            if (url) {
+                onUpdateProfile('logoUrl', url);
             } else {
-                alert("Online session required to upload logo.");
+                alert("Upload failed. Please try again.");
             }
             setIsUploading(false);
         };

@@ -198,13 +198,13 @@ const SprayFoamCalculator: React.FC = () => {
       });
 
       if (savedRecord) {
-          if (session?.spreadsheetId) {
+          if (session) {
              dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
              const stateSnapshot = {
                  ...appData,
                  savedEstimates: appData.savedEstimates.map(e => e.id === savedRecord.id ? savedRecord : e)
              };
-             await syncUp(stateSnapshot, session.spreadsheetId);
+             await syncUp(stateSnapshot);
           }
           await handleMarkPaid(savedRecord.id);
       }
@@ -522,8 +522,7 @@ const SprayFoamCalculator: React.FC = () => {
                 onUpdateProfile={handleProfileChange}
                 onManualSync={handleManualSync}
                 syncStatus={ui.syncStatus}
-                username={session?.username} 
-                spreadsheetId={session?.spreadsheetId} 
+                username={session?.username}
             />
         )}
     </Layout>

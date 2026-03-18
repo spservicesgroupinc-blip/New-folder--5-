@@ -7,7 +7,8 @@ import {
     MessageSquare, History
 } from 'lucide-react';
 import { CalculatorState, EstimateRecord } from '../types';
-import { logCrewTime, completeJob } from '../services/api';
+import { completeJob } from '../services/api';
+import { supabase } from '../src/shared/services/supabase/supabaseClient';
 
 interface CrewDashboardProps {
   state: CalculatorState;
@@ -111,17 +112,29 @@ export const CrewDashboard: React.FC<CrewDashboardProps> = ({ state, onLogout, s
           const endTime = new Date().toISOString();
           setIsSyncingTime(true);
           
-          // Log to backend
-          if (selectedJob.workOrderSheetUrl) {
-            let user = "Crew";
+          // Log time entry to Supabase
+          {
+            let userId: string | undefined;
             try {
-                const s = localStorage.getItem('foamProSession');
-                if (s) user = JSON.parse(s).username;
+                const { data: { user } } = await supabase.auth.getUser();
+                userId = user?.id;
             } catch(e) {
                 console.warn("Could not retrieve session user for timer log");
             }
             
-            await logCrewTime(selectedJob.workOrderSheetUrl, jobStartTime, endTime, user);
+            if (userId) {
+              const { data: company } = await supabase.from('companies').select('id').single();
+              if (company) {
+                // Find or create the time entry for this session
+                await supabase.from('time_entries').insert({
+                  company_id: company.id,
+                  estimate_id: selectedJob.id ? parseInt(selectedJob.id, 10) : null,
+                  user_id: userId,
+                  start_time: jobStartTime,
+                  end_time: endTime,
+                });
+              }
+            }
           }
 
           const sessionDurationHours = (new Date(endTime).getTime() - new Date(jobStartTime).getTime()) / (1000 * 60 * 60);
@@ -167,7 +180,6 @@ export const CrewDashboard: React.FC<CrewDashboardProps> = ({ state, onLogout, s
         if (!sessionStr) throw new Error("Session expired. Please log out and back in.");
         
         const session = JSON.parse(sessionStr);
-        if (!session.spreadsheetId) throw new Error("Invalid session data. Please log out and back in.");
 
         const finalData = {
             ...actuals,
@@ -175,7 +187,7 @@ export const CrewDashboard: React.FC<CrewDashboardProps> = ({ state, onLogout, s
             completedBy: session.username || "Crew"
         };
 
-        const success = await completeJob(selectedJob.id, finalData, session.spreadsheetId);
+        const success = await completeJob(selectedJob.id, finalData);
         
         if (success) {
             setShowCompletionModal(false);

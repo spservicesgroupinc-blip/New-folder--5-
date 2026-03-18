@@ -36,7 +36,7 @@ export const useSync = () => {
       
       try {
           // Attempt Fetch from Cloud (Source of Truth)
-          const cloudData = await syncDown(session.spreadsheetId);
+          const cloudData = await syncDown();
           
           if (cloudData) {
             // Deep merge cloud data over default state
@@ -119,7 +119,7 @@ export const useSync = () => {
     syncTimerRef.current = setTimeout(async () => {
       dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
       
-      const success = await syncUp(appData, session.spreadsheetId);
+      const success = await syncUp(appData);
       
       if (success) {
         lastSyncedStateRef.current = currentStateStr;
@@ -138,7 +138,7 @@ export const useSync = () => {
     if (!session) return;
     dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
     
-    const success = await syncUp(appData, session.spreadsheetId);
+    const success = await syncUp(appData);
     
     if (success) {
       lastSyncedStateRef.current = JSON.stringify(appData);
@@ -156,7 +156,7 @@ export const useSync = () => {
       if (!session) return;
       dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
       try {
-          const cloudData = await syncDown(session.spreadsheetId);
+          const cloudData = await syncDown();
           if (cloudData) {
               const mergedState = { ...state.appData, ...cloudData };
               dispatch({ type: 'LOAD_DATA', payload: mergedState });
