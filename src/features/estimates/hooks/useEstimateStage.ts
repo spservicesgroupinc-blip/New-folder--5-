@@ -7,8 +7,8 @@
  */
 
 import { useCalculator } from '../../../../context/CalculatorContext';
-import { apiSaveEstimate, apiCreateWorkOrderSheet } from '../services/estimatesApi';
-import { markJobPaid, syncUp } from '../../../shared/services/api/sheetsApi';
+import { createEstimate, updateEstimate } from '../services/estimatesApi';
+import { markJobPaid, syncUp } from '../../../../services/api';
 import { generateWorkOrderPDF, generateDocumentPDF } from '../../../../utils/pdfGenerator';
 import type {
   EstimateRecord,
@@ -139,7 +139,7 @@ export function useEstimateStage() {
     });
     dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
 
-    const result = await markJobPaid(id, session?.spreadsheetId || '');
+    const result = await markJobPaid(id);
     if (result.success && result.estimate) {
       const updatedEstimates = appData.savedEstimates.map((e) =>
         e.id === id ? result.estimate! : e,
@@ -201,23 +201,9 @@ export function useEstimateStage() {
     record: EstimateRecord,
     currentWarehouse: typeof appData.warehouse,
   ): Promise<void> => {
-    if (!session?.spreadsheetId) return;
-
     dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
 
     try {
-      const woUrl = await apiCreateWorkOrderSheet(
-        record,
-        session.folderId,
-        session.spreadsheetId,
-      );
-
-      let finalRecord = record;
-      if (woUrl) {
-        finalRecord = { ...record, workOrderSheetUrl: woUrl };
-        dispatch({ type: 'UPDATE_SAVED_ESTIMATE', payload: finalRecord });
-      }
-
       let currentCustomers = [...appData.customers];
       if (!currentCustomers.find((c) => c.id === record.customer.id)) {
         currentCustomers.push(record.customer);
@@ -225,8 +211,8 @@ export function useEstimateStage() {
 
       let freshEstimates = [...appData.savedEstimates];
       const recIdx = freshEstimates.findIndex((e) => e.id === record.id);
-      if (recIdx >= 0) freshEstimates[recIdx] = finalRecord;
-      else freshEstimates.unshift(finalRecord);
+      if (recIdx >= 0) freshEstimates[recIdx] = record;
+      else freshEstimates.unshift(record);
 
       const updatedState = {
         ...appData,
@@ -235,12 +221,12 @@ export function useEstimateStage() {
         savedEstimates: freshEstimates,
       };
 
-      await syncUp(updatedState, session.spreadsheetId);
+      await syncUp(updatedState);
 
       dispatch({ type: 'SET_SYNC_STATUS', payload: 'idle' });
       dispatch({
         type: 'SET_NOTIFICATION',
-        payload: { type: 'success', message: 'Work Order & Sheet Synced Successfully' },
+        payload: { type: 'success', message: 'Work Order Synced Successfully' },
       });
     } catch (e) {
       console.error('Background WO Sync Error', e);
@@ -272,12 +258,10 @@ export function useEstimateStage() {
     });
     dispatch({ type: 'SET_VIEW', payload: 'warehouse' });
 
-    if (session?.spreadsheetId) {
-      dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
-      const updatedState = { ...appData, warehouse: newWarehouse, purchaseOrders: updatedPOs };
-      await syncUp(updatedState, session.spreadsheetId);
-      dispatch({ type: 'SET_SYNC_STATUS', payload: 'idle' });
-    }
+    dispatch({ type: 'SET_SYNC_STATUS', payload: 'syncing' });
+    const updatedState = { ...appData, warehouse: newWarehouse, purchaseOrders: updatedPOs };
+    await syncUp(updatedState);
+    dispatch({ type: 'SET_SYNC_STATUS', payload: 'idle' });
   };
 
   return {

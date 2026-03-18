@@ -250,8 +250,12 @@ export const savePdfToStorage = async (fileName: string, base64Data: string, est
     const { error } = await supabase.storage.from('company-files').upload(path, blob, { upsert: true });
     if (error) throw error;
 
-    const { data: urlData } = supabase.storage.from('company-files').getPublicUrl(path);
-    const url = urlData.publicUrl;
+    // Bucket is private — generate a long-lived signed URL (1 year)
+    const { data: signedData, error: signErr } = await supabase.storage
+      .from('company-files')
+      .createSignedUrl(path, 31536000);
+    if (signErr) throw signErr;
+    const url = signedData.signedUrl;
 
     // Update estimate with PDF URL if provided
     if (estimateId) {
@@ -284,8 +288,12 @@ export const uploadImage = async (base64Data: string, fileName: string = 'image.
     const { error } = await supabase.storage.from('company-files').upload(path, blob, { upsert: true });
     if (error) throw error;
 
-    const { data: urlData } = supabase.storage.from('company-files').getPublicUrl(path);
-    return urlData.publicUrl;
+    // Bucket is private — generate a long-lived signed URL (1 year)
+    const { data: signedData, error: signErr } = await supabase.storage
+      .from('company-files')
+      .createSignedUrl(path, 31536000);
+    if (signErr) throw signErr;
+    return signedData.signedUrl;
   } catch (error) {
     console.error("uploadImage error:", error);
     return null;
@@ -293,18 +301,82 @@ export const uploadImage = async (base64Data: string, fileName: string = 'image.
 };
 
 /**
+ * Admin login — email/username + password via Supabase Auth
+ */
+export const loginUser = async (email: string, password: string): Promise<UserSession | null> => {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data.session) return null;
+
+  const { data: member } = await supabase
+    .from('company_members')
+    .select('company_id, role, companies(name)')
+    .eq('user_id', data.session.user.id)
+    .limit(1)
+    .single();
+
+  if (!member) return null;
+  const row = member as any;
+
+  return {
+    username: email,
+    companyName: row.companies?.name ?? '',
+    companyId: row.company_id,
+    role: row.role ?? 'admin',
+  };
+};
+
+/**
+ * Crew login — company username + numeric PIN
+ */
+export const loginCrew = async (companyUsername: string, pin: string): Promise<UserSession | null> => {
+  // Crew members authenticate with their email + PIN-as-password
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: companyUsername,
+    password: pin,
+  });
+  if (error || !data.session) return null;
+
+  const { data: member } = await supabase
+    .from('company_members')
+    .select('company_id, role, companies(name)')
+    .eq('user_id', data.session.user.id)
+    .limit(1)
+    .single();
+
+  if (!member) return null;
+  const row = member as any;
+
+  return {
+    username: companyUsername,
+    companyName: row.companies?.name ?? '',
+    companyId: row.company_id,
+    role: row.role ?? 'crew',
+  };
+};
+
+/**
  * Creates a new company account
  */
 export const signupUser = async (username: string, password: string, companyName: string): Promise<UserSession | null> => {
-    const result = await apiRequest({ action: 'SIGNUP', payload: { username, password, companyName } });
-    if (result.status === 'success') return result.data;
-    throw new Error(result.message || "Signup failed");
+  const { data, error } = await supabase.auth.signUp({ email: username, password });
+  if (error || !data.session) throw new Error(error?.message || 'Signup failed');
+
+  const { error: fnError } = await supabase.functions.invoke('create-company', {
+    body: { companyName },
+  });
+  if (fnError) throw fnError;
+
+  return {
+    username,
+    companyName,
+    role: 'admin',
+  };
 };
 
 /**
  * Submits lead for trial access
  */
 export const submitTrial = async (name: string, email: string, phone: string): Promise<boolean> => {
-    const result = await apiRequest({ action: 'SUBMIT_TRIAL', payload: { name, email, phone } });
-    return result.status === 'success';
+  const { error } = await supabase.from('trial_leads').insert({ name, email, phone });
+  return !error;
 };

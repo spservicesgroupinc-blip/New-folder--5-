@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { useCalculator } from '../../../../context/CalculatorContext';
-import { apiDeleteEstimate } from '../services/estimatesApi';
+import { deleteEstimate as apiDeleteEstimate } from '../services/estimatesApi';
 import type { CustomerProfile, EstimateRecord } from '../../../../types';
 
 
@@ -29,19 +29,17 @@ export function useEstimateActions() {
       dispatch({ type: 'SET_VIEW', payload: 'dashboard' });
     }
 
-    if (session?.spreadsheetId) {
-      try {
-        await apiDeleteEstimate(id, session.spreadsheetId);
-        dispatch({
-          type: 'SET_NOTIFICATION',
-          payload: { type: 'success', message: 'Job Deleted' },
-        });
-      } catch {
-        dispatch({
-          type: 'SET_NOTIFICATION',
-          payload: { type: 'error', message: 'Local delete success, but server failed.' },
-        });
-      }
+    try {
+      await apiDeleteEstimate(parseInt(id, 10));
+      dispatch({
+        type: 'SET_NOTIFICATION',
+        payload: { type: 'success', message: 'Job Deleted' },
+      });
+    } catch {
+      dispatch({
+        type: 'SET_NOTIFICATION',
+        payload: { type: 'error', message: 'Local delete success, but server sync failed.' },
+      });
     }
   };
 

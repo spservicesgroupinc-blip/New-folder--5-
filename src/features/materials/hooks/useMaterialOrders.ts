@@ -7,7 +7,7 @@
 
 import { useMemo, useCallback } from 'react';
 import { useCalculator } from '../../../../context/CalculatorContext';
-import { apiSavePurchaseOrder } from '../services/materialsApi';
+import { createPurchaseOrder } from '../services/materialsApi';
 import type { PurchaseOrder } from '../../../../types';
 
 export function useMaterialOrders() {
@@ -38,13 +38,20 @@ export function useMaterialOrders() {
         payload: { purchaseOrders: updated },
       });
 
-      const spreadsheetId = state.session?.spreadsheetId;
-      if (spreadsheetId) {
-        const nextState = {
-          ...state.appData,
-          purchaseOrders: updated,
-        };
-        await apiSavePurchaseOrder(po, nextState, spreadsheetId);
+      try {
+        await createPurchaseOrder(
+          { company_id: state.session?.companyId ?? 0, vendor_name: po.vendorName, total_cost: po.totalCost, notes: po.notes },
+          po.items.map((item) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unit_cost: item.unitCost,
+            total: item.total,
+            type: item.type,
+            inventory_id: item.inventoryId ? parseInt(item.inventoryId, 10) : undefined,
+          })),
+        );
+      } catch (err) {
+        console.error('Failed to sync purchase order to Supabase:', err);
       }
     },
     [dispatch, orders, state.appData, state.session],

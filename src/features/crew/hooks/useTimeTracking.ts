@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useCalculator } from '../../../../context/CalculatorContext';
-import { apiLogCrewTime } from '../../invoice/services/invoiceApi';
+import { logCrewTime } from '../../invoice/services/invoiceApi';
+import { supabase } from '../../../shared/services/supabase';
 import { TimeEntry } from '../types/crew.types';
 
 interface UseTimeTrackingResult {
@@ -54,8 +55,17 @@ export function useTimeTracking(jobId: string): UseTimeTrackingResult {
     const endTime = new Date().toISOString();
     const user = session?.username ?? 'unknown';
 
-    if (workOrderUrl) {
-      await apiLogCrewTime(workOrderUrl, clockInTime, endTime, user);
+    if (session?.companyId) {
+      const { data: { user: sbUser } } = await supabase.auth.getUser();
+      if (sbUser) {
+        await logCrewTime({
+          company_id: session.companyId,
+          estimate_id: jobId ? parseInt(jobId, 10) : undefined,
+          user_id: sbUser.id,
+          start_time: clockInTime,
+          end_time: endTime,
+        });
+      }
     }
 
     const entry: TimeEntry = {

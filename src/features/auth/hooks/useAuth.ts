@@ -92,6 +92,23 @@ export function useAuth() {
   );
 
   // -------------------------------------------------------------------------
+  // loginCrew — crew member logs in with email + PIN
+  // -------------------------------------------------------------------------
+
+  const loginCrew = useCallback(
+    async (email: string, pin: string): Promise<void> => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      const { error } = await supabase.auth.signInWithPassword({ email, password: pin });
+      if (error) {
+        dispatch({ type: 'SET_LOADING', payload: false });
+        throw error;
+      }
+      // onAuthStateChange in AuthContext handles the rest
+    },
+    [dispatch],
+  );
+
+  // -------------------------------------------------------------------------
   // inviteCrew — admin invites a crew member by email
   // -------------------------------------------------------------------------
 
@@ -123,6 +140,7 @@ export function useAuth() {
     needsCompanySetup,
     companyId,
     login,
+    loginCrew,
     signup,
     createCompany,
     inviteCrew,
