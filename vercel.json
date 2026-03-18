@@ -1,4 +1,6 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
     { "source": "/((?!assets|sw\\.js|manifest\\.json|.*\\.png).*)", "destination": "/index.html" }
   ],
