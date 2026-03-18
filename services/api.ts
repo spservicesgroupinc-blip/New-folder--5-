@@ -291,7 +291,6 @@ export const uploadImage = async (base64Data: string, fileName: string = 'image.
     return null;
   }
 };
-};
 
 /**
  * Creates a new company account
