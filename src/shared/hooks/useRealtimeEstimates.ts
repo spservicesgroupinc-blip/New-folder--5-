@@ -7,8 +7,8 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { supabase } from '../../../shared/services/supabase';
-import type { Estimate } from '../../../shared/types/database.types';
+import { supabase } from '../services/supabase';
+import type { Estimate } from '../types/database.types';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface UseRealtimeEstimatesOptions {
